@@ -1,0 +1,86 @@
+ID: myapp
+_schema-version: "3.1"
+version: 0.0.1
+
+parameters:
+  enable-parallel-deployments: true
+
+modules:
+
+  - name: myapp-srv
+    type: nodejs
+    path: srv
+    build-parameters:
+      ignore:
+        - default-*.json
+        - .env
+        - "*node_modules*"
+    parameters:
+      memory: 256M
+      disk-quota: 512M
+    provides:
+      - name: srv_api
+        properties:
+          url: ${default-url}
+    requires:
+      - name: myapp-uaa
+      - name: myapp-registry
+
+  - name: myapp
+    type: html5
+    path: app
+    build-parameters:
+      ignore:
+        - default-*.json
+        - .env
+        - "*node_modules*"
+    parameters:
+      memory: 256M
+      disk-quota: 512M
+      keep-existing-routes: true
+    provides:
+      - name: app_api
+        properties:
+          url: ${default-url}
+          application: ${app-name}
+    properties:
+      TENANT_HOST_PATTERN: '^(.*)-${space}-${app-name}.${default-domain}'
+    requires:
+      - name: myapp-uaa
+      - name: srv_api
+        group: destinations
+        properties:
+          name: srv
+          url: ~{url}
+          forwardAuthToken: true
+
+resources:
+  - name: myapp-uaa
+    type: org.cloudfoundry.managed-service
+    requires: 
+      - name: app_api
+    properties:
+      XSAPPNAME: ${xsuaa-app}
+    parameters:
+      path: ./xs-security.json
+      service: xsuaa
+      service-plan: application
+      xsuaa-app: ${space}-~{app_api/application}
+      config:
+        xsappname: ${xsuaa-app}
+  - name: myapp-registry
+    type: org.cloudfoundry.managed-service
+    requires:
+      - name: myapp-uaa
+    parameters:
+      service: saas-registry
+      service-plan: application
+      service-name: myapp-registry
+      config:
+        xsappname: ~{myapp-uaa/XSAPPNAME}
+        appName: myapp
+        displayName: 'myapp'
+        description: 'My SaaS Business Application'
+        category: 'SaaS Multitenant Apps'
+        appUrls:
+          onSubscription: https://${org}-${space}-myapp-srv.${default-domain}/callback/v1.0/tenants/{tenantId}
